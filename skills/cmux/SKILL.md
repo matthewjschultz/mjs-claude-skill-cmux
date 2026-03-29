@@ -27,6 +27,12 @@ If these aren't set, you're not in cmux — skip cmux-specific features graceful
 
 When running inside cmux, automatically do these things without being asked:
 
+**Workspace color sync** — When a Claude Code session starts inside cmux, set the workspace color to match Claude Code's theme color so the user can visually identify which workspaces have active CC sessions:
+```bash
+cmux workspace-action --action set-color --color Purple
+```
+If the user has already set a workspace color, respect it — don't override their choice. Only set the color if the workspace doesn't already have one. Clear the color when the session ends if you were the one who set it.
+
 **Progress feedback** — For any task that takes more than a few seconds (builds, test suites, deployments, large refactors), show progress in the sidebar:
 ```bash
 cmux set-status task "building" --icon hammer --color "#ff9500"
@@ -73,7 +79,21 @@ cmux current-workspace                         # Get current workspace info
 cmux select-workspace --workspace <id|ref>     # Switch to a workspace
 cmux close-workspace --workspace <id|ref>      # Close a workspace
 cmux rename-workspace [--workspace <id|ref>] <title>  # Rename a workspace
+cmux reorder-workspace --workspace <id|ref> (--index <n> | --before <id|ref> | --after <id|ref>)
 ```
+
+**Workspace actions** — context-menu operations including color:
+```bash
+cmux workspace-action --action set-color --color <name|#hex> [--workspace <id|ref>]
+cmux workspace-action --action clear-color [--workspace <id|ref>]
+cmux workspace-action --action pin [--workspace <id|ref>]
+cmux workspace-action --action unpin [--workspace <id|ref>]
+cmux workspace-action --action rename --title <text> [--workspace <id|ref>]
+```
+
+Named colors: `Red`, `Crimson`, `Orange`, `Amber`, `Olive`, `Green`, `Teal`, `Aqua`, `Blue`, `Navy`, `Indigo`, `Purple`, `Magenta`, `Rose`, `Brown`, `Charcoal`
+
+Colors also accept `#RRGGBB` hex values for exact matching.
 
 ### Windows
 
@@ -100,6 +120,25 @@ cmux tree [--all] [--workspace <id|ref>]       # Show full hierarchy
 cmux focus-pane --pane <id|ref> [--workspace <id|ref>]
 cmux close-surface [--surface <id|ref>] [--workspace <id|ref>]
 cmux resize-pane --pane <id|ref> [--workspace <id|ref>] (-L|-R|-U|-D) [--amount <n>]
+```
+
+### Surface / Tab Management
+
+Surfaces appear as tabs within panes. You can rename them, reorder them, move them between panes, and perform context-menu actions.
+
+```bash
+cmux rename-tab <title>                        # Rename current surface's tab
+cmux rename-tab --surface <id|ref> <title>     # Rename a specific surface's tab
+cmux tab-action --action <name> [--tab <id|ref>] [--surface <id|ref>] [--workspace <id|ref>]
+```
+
+Tab actions: `rename`, `clear-name`, `close-left`, `close-right`, `close-others`, `new-terminal-right`, `new-browser-right`, `reload`, `duplicate`, `pin`, `unpin`, `mark-unread`
+
+```bash
+cmux move-surface --surface <id|ref> [--pane <id|ref>] [--before <id|ref>] [--after <id|ref>] [--index <n>]
+cmux reorder-surface --surface <id|ref> (--index <n> | --before <id|ref> | --after <id|ref>)
+cmux surface-health [--workspace <id|ref>]     # Check surface health status
+cmux refresh-surfaces                          # Refresh surface snapshots for focused workspace
 ```
 
 ### Sending Input
@@ -331,6 +370,90 @@ One of cmux's most powerful uses is coordinating multiple AI agents. Here's the 
    ```bash
    cmux notify --title "All agents complete" --body "Auth, DB, and API modules ready"
    ```
+
+## Active Polling — Detecting Changes
+
+cmux surfaces are dynamic — the user can rearrange panes, rename tabs, or change workspace colors at any time. When orchestrating multi-agent workflows or maintaining awareness of the environment, poll the cmux state periodically to detect changes and adapt.
+
+### What to poll and when
+
+**Layout changes** — The user may drag panes to rearrange, split, or close surfaces. Poll `cmux tree` to detect when pane structure changes:
+```bash
+cmux tree [--workspace <id|ref>]
+```
+Compare against a previous snapshot to detect new/removed/reordered panes and surfaces.
+
+**Surface renames** — The user can rename tabs manually. Poll `cmux list-pane-surfaces` or `cmux tree` to notice when surface titles change:
+```bash
+cmux list-pane-surfaces [--workspace <id|ref>]
+```
+If you're tracking surfaces by name (e.g., "build-agent", "test-runner"), re-resolve names after detecting a rename.
+
+**Workspace color changes** — Workspaces can have a color set by the user or programmatically. Currently, `cmux tree` output does not include color — use `cmux workspace-action` to set/clear colors, and track your own color state.
+
+### Polling patterns
+
+For long-running orchestration tasks, poll at reasonable intervals (every 5-15 seconds). Don't poll more frequently than needed — cmux commands are fast but unnecessary polling adds noise.
+
+```bash
+# Snapshot the layout at the start of a multi-agent task
+LAYOUT_BEFORE=$(cmux tree --workspace "$CMUX_WORKSPACE_ID")
+
+# ... later, check for changes
+LAYOUT_NOW=$(cmux tree --workspace "$CMUX_WORKSPACE_ID")
+if [ "$LAYOUT_BEFORE" != "$LAYOUT_NOW" ]; then
+  # Layout changed — re-resolve surface IDs, adapt orchestration
+fi
+```
+
+When a layout change is detected:
+1. **Re-resolve surface IDs** — A surface you were targeting may have moved to a different pane
+2. **Check for closed surfaces** — An agent's surface may have been closed by the user
+3. **Re-evaluate layout before acting** — Don't blindly proceed with your original plan. Re-read the Intelligent Splitting rules and apply them to the *current* layout, not the one you started with.
+
+### Informed Layout Decisions
+
+Every time you're about to create a pane — whether at the start of a task or after detecting a layout change — run `cmux tree` and reason about the result before acting. The tree tells you everything you need:
+
+**Read the shape.** Count panes and infer the geometry:
+- 1 pane → single full-screen. Split right for side-by-side.
+- 2 panes, both top-level children → side-by-side (left/right). Split one of them down for an L-shape.
+- 2 panes, one nested under the other → stacked (top/bottom). Split one right to avoid a third vertical slice.
+- 3+ panes → workspace is getting crowded. Prefer a new workspace over another split.
+
+**Respect user intent.** If the user rearranged panes since your last check, treat their layout as intentional:
+- If they widened a pane, they want space there — don't split it.
+- If they moved a browser pane to the left, split new terminals to the right.
+- If they closed a pane you created, don't recreate it.
+
+**Match surface type to position.** When choosing where to place a new surface:
+- Terminals with scrolling output (servers, logs, test watchers) → prefer vertical splits (tall and narrow is fine)
+- Browsers and editors → prefer horizontal space (split right, not down)
+- Monitoring / quick-glance surfaces → bottom splits (wide and short)
+
+**Example — adapting to a detected change:**
+```bash
+# You started with 2 panes side-by-side and planned to add a third on the right.
+# But the user dragged the layout into a top/bottom stack.
+TREE=$(cmux tree)
+
+# Now top/bottom — adding another right split would create 3 columns.
+# Instead, split the bottom pane right to get a 1-over-2 layout:
+cmux new-split right --surface surface:3
+```
+
+**When in doubt, ask.** If the layout is complex (4+ panes) and you're unsure where to put something, ask the user rather than guessing wrong and disrupting their arrangement.
+
+### Synchronization with wait-for
+
+For coordinated multi-agent workflows, use `cmux wait-for` instead of polling when you need to synchronize on specific events:
+```bash
+# Agent A signals completion
+cmux wait-for --signal "auth-done"
+
+# Agent B waits for that signal
+cmux wait-for "auth-done" --timeout 60
+```
 
 ## Style Guide
 
