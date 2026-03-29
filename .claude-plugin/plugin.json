@@ -1,0 +1,12 @@
+{
+  "name": "cmux",
+  "description": "Claude Code integration for the cmux terminal multiplexer — workspace management, pane splitting, notifications, sidebar status, browser automation, and multi-agent orchestration",
+  "version": "1.0.0",
+  "author": {
+    "name": "Matthew Schultz"
+  },
+  "homepage": "https://github.com/matthewjschultz/mjs-claude-skill-cmux",
+  "repository": "https://github.com/matthewjschultz/mjs-claude-skill-cmux",
+  "license": "MIT",
+  "keywords": ["cmux", "terminal", "multiplexer", "panes", "notifications", "multi-agent"]
+}
