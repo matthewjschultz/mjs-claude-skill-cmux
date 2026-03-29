@@ -1,0 +1,82 @@
+[
+  {
+    "query": "I'm running a big test suite (about 200 integration tests against our staging DB) and I need to switch to another workspace to keep coding. Can you run them and make sure I get a notification when they're done? I want to see progress too, not just the final result.",
+    "should_trigger": true
+  },
+  {
+    "query": "open a split pane on the right side and start `npm run dev` in it, I want to keep my editor here on the left",
+    "should_trigger": true
+  },
+  {
+    "query": "I've got 4 claude code agents going in different panes â€” one doing the auth refactor, one on the DB migration, one writing API tests, and one updating docs. Set up monitoring so I can see which ones are done and which are still running without switching between them.",
+    "should_trigger": true
+  },
+  {
+    "query": "this deploy script takes like 10 minutes to run. Can you kick it off and update the sidebar with how far along it is? I need to context switch to something else while it runs.",
+    "should_trigger": true
+  },
+  {
+    "query": "send 'git pull && npm install' to the terminal in my second pane (the one on the right), I don't want to switch over there",
+    "should_trigger": true
+  },
+  {
+    "query": "create 3 new workspaces for me â€” one for the frontend repo, one for the backend, and one for infra. I want to run separate agents in each.",
+    "should_trigger": true
+  },
+  {
+    "query": "the cmux socket isn't connecting, I keep getting connection refused. I'm on the debug build. Can you help me figure out what's wrong?",
+    "should_trigger": true
+  },
+  {
+    "query": "after this build finishes, send a notification with the build time and whether it passed or failed. I'll be in another workspace reviewing PRs.",
+    "should_trigger": true
+  },
+  {
+    "query": "set up status indicators in the sidebar showing which microservices are running â€” api on port 3000, auth on 3001, and the worker on 3002. Green if healthy, red if down.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to run the linter across the whole repo. Show me a progress bar while it's running and log any files that have warnings.",
+    "should_trigger": true
+  },
+  {
+    "query": "can you open a new tmux pane and run my tests in it? I'm using iTerm2 and want to split the window",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to set up a cron job that runs our backup script every night at 2am and sends me a Slack notification when it's done",
+    "should_trigger": false
+  },
+  {
+    "query": "write a bash script that monitors CPU usage and sends a desktop notification via osascript when it goes above 90%",
+    "should_trigger": false
+  },
+  {
+    "query": "help me configure my ghostty terminal â€” I want to change the font to JetBrains Mono and set the background opacity to 0.95",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to build a dashboard that shows the status of our 5 production services with health checks, using React and a websocket connection",
+    "should_trigger": false
+  },
+  {
+    "query": "set up a CI/CD pipeline in GitHub Actions that runs tests in parallel across 3 containers and posts results to our Slack channel",
+    "should_trigger": false
+  },
+  {
+    "query": "I'm trying to multiplex my API requests to hit 3 different backends simultaneously and merge the results. Can you help me write that in Python with asyncio?",
+    "should_trigger": false
+  },
+  {
+    "query": "create a terminal UI app using blessed/curses that shows a split view with logs on the left and metrics on the right",
+    "should_trigger": false
+  },
+  {
+    "query": "help me write a VS Code extension that shows build progress in the status bar and sends native OS notifications on completion",
+    "should_trigger": false
+  },
+  {
+    "query": "I want to use screen to keep my long-running SSH sessions alive and detach/reattach to them from different machines",
+    "should_trigger": false
+  }
+]
