@@ -1,0 +1,16 @@
+{
+  "name": "mjs-cmux",
+  "owner": {
+    "name": "Matthew Schultz"
+  },
+  "metadata": {
+    "description": "Claude Code integration for the cmux terminal multiplexer"
+  },
+  "plugins": [
+    {
+      "name": "cmux",
+      "source": "./",
+      "description": "Claude Code integration for the cmux terminal multiplexer — workspace management, pane splitting, notifications, sidebar status, browser automation, and multi-agent orchestration"
+    }
+  ]
+}
