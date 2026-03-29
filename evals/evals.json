@@ -1,0 +1,23 @@
+{
+  "skill_name": "cmux",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Run the test suite in this project (just pretend there's a `npm test` command) and let me know when it's done. I'm going to be working in another workspace so make sure I see it.",
+      "expected_output": "Claude should use cmux set-progress and cmux set-status to show test progress in the sidebar, then cmux notify when tests complete, and cmux log to record the outcome.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Open a new pane to the right and start a dev server with `npm run dev` in it. I want to keep coding in this pane.",
+      "expected_output": "Claude should use cmux new-split right, get the new surface ID, then cmux send-surface to run the dev server command in the new pane.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "I've got claude code agents running in 3 different panes working on auth, database, and API modules. Can you set up the sidebar to track their progress and alert me when any of them finishes or hits an error?",
+      "expected_output": "Claude should use cmux list-surfaces to find the panes, set up status pills for each agent, use cmux log to track milestones, and explain how notifications will fire on completion/error.",
+      "files": []
+    }
+  ]
+}
