@@ -218,6 +218,11 @@ cmux sidebar-state [--workspace <id|ref>]
 
 cmux has an embedded browser with a full automation API. Create browser panes and control them programmatically.
 
+**IMPORTANT: `--surface` must come BEFORE the subcommand name.** Unlike most CLI tools, placing `--surface` after the subcommand causes a parse error. The correct pattern is:
+```
+cmux browser [--surface <id|ref>] <subcommand> [subcommand-args]
+```
+
 ```bash
 cmux browser open [url]                        # Open browser in new split
 cmux browser open-split [url]                  # Explicit split
@@ -237,6 +242,17 @@ cmux browser is <visible|enabled|checked> <selector>
 cmux browser console <list|clear>
 cmux browser errors <list|clear>
 cmux browser tab <new|list|switch|close|<index>> [...]
+```
+
+When targeting a browser in another pane, always put `--surface` first:
+```bash
+# Correct
+cmux browser --surface surface:3 screenshot --out /tmp/page.png
+cmux browser --surface surface:3 click '#submit-btn'
+cmux browser --surface surface:3 eval 'document.title'
+
+# Wrong — will fail with "Unsupported browser subcommand"
+cmux browser screenshot --surface surface:3 --out /tmp/page.png
 ```
 
 ### Utility
