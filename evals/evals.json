@@ -16,7 +16,7 @@
     {
       "id": 3,
       "prompt": "I've got claude code agents running in 3 different panes working on auth, database, and API modules. Can you set up the sidebar to track their progress and alert me when any of them finishes or hits an error?",
-      "expected_output": "Claude should use cmux list-surfaces to find the panes, set up status pills for each agent, use cmux log to track milestones, and explain how notifications will fire on completion/error.",
+      "expected_output": "Claude should use cmux tree to find the panes, set up status pills for each agent, use cmux log to track milestones, and explain how notifications will fire on completion/error.",
       "files": []
     }
   ]

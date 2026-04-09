@@ -216,44 +216,142 @@ cmux sidebar-state [--workspace <id|ref>]
 
 ### Browser Automation
 
-cmux has an embedded browser with a full automation API. Create browser panes and control them programmatically.
+cmux has an embedded browser with an automation API. Create browser panes and control them programmatically.
 
-**IMPORTANT: `--surface` must come BEFORE the subcommand name.** Unlike most CLI tools, placing `--surface` after the subcommand causes a parse error. The correct pattern is:
+**IMPORTANT: `--surface` must come BEFORE the subcommand name.** Placing `--surface` after the subcommand fails with `browser requires a subcommand`. The correct pattern is:
 ```
 cmux browser [--surface <id|ref>] <subcommand> [subcommand-args]
 ```
 
+**IMPORTANT: Use `127.0.0.1`, not `localhost`.** The embedded browser cannot resolve `localhost` and shows "This page couldn't load." Always substitute `127.0.0.1` in URLs passed to `open`, `goto`, and similar commands:
 ```bash
-cmux browser open [url]                        # Open browser in new split
+# BROKEN
+cmux browser open http://localhost:3000
+
+# WORKS
+cmux browser open http://127.0.0.1:3000
+```
+
+**KNOWN BUG — `eval`, `press`, and `addscript` are currently broken** (manaflow-ai/cmux#2610, confirmed on cmux 0.63.0 stable and 0.63.1 nightly). Every invocation — even trivial ones like `cmux browser eval "1"` — returns `Error: js_error: A JavaScript exception occurred` with exit code 1. Read-only commands (`get`, `click`, `snapshot`, `console list`, `errors list`) work fine on the same surface. Until the bug is fixed:
+
+- **Don't use `eval`** for inspection — use `get text`, `get html`, `get title`, `snapshot`, or `console list` / `errors list` instead.
+- **Don't use `press`** for keyboard input — use `click`, `type`, or `fill` on the target element, or drive the underlying API directly with `curl`.
+- **Don't use `addscript`.**
+
+```bash
+cmux browser open [url]                        # Open/reuse a browser surface; prints surface id
 cmux browser open-split [url]                  # Explicit split
 cmux browser goto <url> [--snapshot-after]     # Navigate
 cmux browser back|forward|reload [--snapshot-after]
-cmux browser url                               # Get current URL
-cmux browser snapshot [--interactive] [--compact]  # Get DOM snapshot
-cmux browser eval <script>                     # Execute JavaScript
+cmux browser snapshot [--interactive] [--compact]  # Accessibility tree — primary inspection tool
 cmux browser click <selector> [--snapshot-after]
 cmux browser type <selector> <text> [--snapshot-after]
 cmux browser fill <selector> [text] [--snapshot-after]
-cmux browser press <key> [--snapshot-after]
-cmux browser screenshot [--out <path>] [--json]
+cmux browser screenshot [--json]               # Returns base64 PNG (no --out flag)
 cmux browser wait [--selector <css>] [--text <text>] [--url-contains <text>] [--timeout-ms <ms>]
 cmux browser get <url|title|text|html|value|attr|count|box|styles> [...]
 cmux browser is <visible|enabled|checked> <selector>
-cmux browser console <list|clear>
-cmux browser errors <list|clear>
+cmux browser console <list|clear>              # Read/clear captured console messages
+cmux browser errors <list|clear>               # Read/clear captured page errors
 cmux browser tab <new|list|switch|close|<index>> [...]
+# BROKEN (manaflow-ai/cmux#2610): eval, press, addscript — all fail with js_error
 ```
 
 When targeting a browser in another pane, always put `--surface` first:
 ```bash
 # Correct
-cmux browser --surface surface:3 screenshot --out /tmp/page.png
+cmux browser --surface surface:3 snapshot
+cmux browser --surface surface:3 screenshot
 cmux browser --surface surface:3 click '#submit-btn'
-cmux browser --surface surface:3 eval 'document.title'
+cmux browser --surface surface:3 get title
 
-# Wrong — will fail with "Unsupported browser subcommand"
-cmux browser screenshot --surface surface:3 --out /tmp/page.png
+# Wrong — fails with "browser requires a subcommand"
+cmux browser snapshot --surface surface:3
 ```
+
+**Finding browser surfaces.** There is no `list-surfaces` command — use `cmux tree` to discover browser surface IDs:
+```bash
+cmux tree
+# pane pane:5
+#   ├── surface surface:1 [browser] "MDLZ" http://127.0.0.1:3000/
+#   └── surface surface:10 [browser] "MDLZ" [selected] http://127.0.0.1:3000/
+```
+
+`cmux browser open <url>` reuses an existing browser surface in the workspace when one exists (prints `placement=reuse`) and prints the surface id on success, so you can capture it for subsequent commands:
+```bash
+cmux browser open http://127.0.0.1:3000
+# OK surface=surface:10 pane=pane:5 placement=reuse
+```
+
+#### Inspection: `snapshot`, `get`, `console list`, `errors list`
+
+With `eval` broken (manaflow-ai/cmux#2610), inspection relies on the read-only commands.
+
+`snapshot` returns a structured accessibility tree — the fastest way to understand page state. `--interactive` assigns refs to clickable elements:
+```bash
+cmux browser --surface surface:10 snapshot
+cmux browser --surface surface:10 snapshot --interactive
+```
+
+`get` extracts specific fields from the page without running JS:
+```bash
+cmux browser --surface surface:10 get title
+cmux browser --surface surface:10 get url
+cmux browser --surface surface:10 get text "body"       # Visible text of an element
+cmux browser --surface surface:10 get text "h1"
+cmux browser --surface surface:10 get html "#root"      # Inner HTML of an element
+cmux browser --surface surface:10 get value "input[name=email]"
+cmux browser --surface surface:10 get attr "a.primary" "href"
+cmux browser --surface surface:10 get count "button"    # How many elements match
+```
+
+`console list` and `errors list` return messages and page errors that the browser has captured — use these instead of trying to read `console.log` output through `eval`:
+```bash
+cmux browser --surface surface:10 console list
+cmux browser --surface surface:10 errors list
+cmux browser --surface surface:10 console clear         # Reset before an action to isolate new messages
+```
+
+#### Clicking: use CSS selectors, beware React
+
+Two important caveats for `click`:
+
+1. **CSS selectors are more reliable than ref selectors.** Refs from `snapshot --interactive` expire between snapshots and frequently fail with "Element not found". Prefer CSS:
+   ```bash
+   # Reliable
+   cmux browser --surface surface:10 click "button:nth-child(5)" --snapshot-after
+
+   # Often fails
+   cmux browser --surface surface:10 click '[ref=e12]'
+   ```
+
+2. **Synthetic clicks may not trigger React state changes.** `cmux browser click` (and JS `element.click()` / dispatched MouseEvents) often do not propagate through React's synthetic event system, so tab switches and other React-controlled UI interactions may appear to do nothing. For inspection and error diagnosis this is fine; for *interaction* with React apps, automation is limited — fall back to hitting the underlying APIs with `curl`.
+
+#### Unsupported / removed / broken commands
+
+Don't use any of these — the first two don't exist, the third has a positional/flag gotcha, and the rest are currently broken upstream:
+
+| Don't use | Use instead |
+|-----------|-------------|
+| `cmux list-surfaces` / `cmux list-surfaces --json` | `cmux tree` |
+| `cmux browser navigate <url>` | `cmux browser goto <url>` |
+| `cmux browser screenshot --out <path>` | `cmux browser --surface <id> screenshot` (returns base64) or `--json` |
+| `cmux browser screenshot` (without `--surface` first) | `cmux browser --surface <id> screenshot` |
+| `cmux browser eval <script>` — **broken** (manaflow-ai/cmux#2610) | `get text` / `get html` / `snapshot` / `console list` / `errors list` |
+| `cmux browser press <key>` — **broken** (manaflow-ai/cmux#2610) | `click` / `type` / `fill`, or hit the API directly with `curl` |
+| `cmux browser addscript <script>` — **broken** (manaflow-ai/cmux#2610) | No workaround; wait for the fix |
+
+#### Browser debugging workflow
+
+When something is broken in a web app running in a cmux browser surface:
+
+1. **Find the browser surface:** `cmux tree`
+2. **Get page structure:** `cmux browser --surface <id> snapshot`
+3. **Check visible text:** `cmux browser --surface <id> get text "body"`
+4. **Check captured console output:** `cmux browser --surface <id> console list`
+5. **Check captured page errors:** `cmux browser --surface <id> errors list`
+6. **If the page won't load at all, try `127.0.0.1` instead of `localhost`.**
+7. **For API errors, use `curl` directly** — and note that even if you wanted to drive the React UI through automation, `eval` and `press` are currently broken (manaflow-ai/cmux#2610), so API-level testing is the robust path.
 
 ### Utility
 
