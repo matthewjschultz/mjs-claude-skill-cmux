@@ -8,6 +8,8 @@ description: |
 
 cmux is a native macOS terminal built on Ghostty for running multiple AI coding agents in parallel. When Claude Code runs inside cmux, it can provide rich visual feedback and orchestrate across panes.
 
+This file is the **pattern guide** — how to think about cmux and the commands you'll use most. For exhaustive flags and lesser-used subcommands, read `api-reference.md` in this skill directory.
+
 ## Detection
 
 Before using any cmux command, confirm you're inside cmux. The terminal sets these environment variables automatically:
@@ -23,253 +25,118 @@ Quick check:
 
 If these aren't set, you're not in cmux — skip cmux-specific features gracefully. Never fail a task just because cmux isn't available.
 
+## Quick Reference
+
+The happy path for the most common operations. Use these verbatim before reaching for anything fancier.
+
+| Task | Command |
+|------|---------|
+| See workspace layout | `cmux tree` |
+| Open terminal split (right) | `cmux new-split right` |
+| Open browser split (right) | `cmux new-pane --type browser --direction right [--url <url>]` |
+| Open/reuse a browser surface | `cmux browser open [url]` |
+| Send command to a surface | `cmux send --surface <id> "cmd"` then `cmux send-key --surface <id> enter` |
+| Read surface output | `cmux read-screen --surface <id> --lines 50` |
+| Navigate browser (specific surface) | `cmux browser --surface <id> goto <url>` |
+| Inspect browser page | `cmux browser --surface <id> snapshot` |
+| Show notification | `cmux notify --title "Title" --body "Body"` |
+| Sidebar status pill | `cmux set-status <key> "value" --icon <name> --color "#hex"` |
+| Sidebar progress bar | `cmux set-progress 0.5 --label "Working..."` |
+| Sidebar log entry | `cmux log --level success "Done"` |
+
+IDs accepted everywhere: UUIDs, short refs (`window:1`, `workspace:2`, `pane:3`, `surface:4`), or indexes.
+
+## Common Mistakes — Never Do This
+
+These commands **do not exist** or are **broken**. Using them is the most common cmux failure mode. The wrong-looking ones are plausible guesses that happen to be wrong — always prefer the "Use instead" column:
+
+| Don't use | Use instead | Why |
+|-----------|-------------|-----|
+| `cmux send-surface <id> "text"` | `cmux send --surface <id> "text"` | `send-surface` was never a real command |
+| `cmux send-key-surface <id> enter` | `cmux send-key --surface <id> enter` | Same — `--surface` is a flag, not a suffix |
+| `cmux list-surfaces` / `--json` | `cmux tree` | No `list-surfaces` command exists |
+| `cmux new-split right --browser` | `cmux new-pane --type browser --direction right` | `new-split` has no `--browser` flag and always makes terminals |
+| `cmux browser navigate <url>` | `cmux browser goto <url>` | Subcommand is `goto`, not `navigate` |
+| `cmux browser snapshot --surface <id>` | `cmux browser --surface <id> snapshot` | `--surface` must come **before** the browser subcommand |
+| `cmux browser screenshot --out <path>` | `cmux browser --surface <id> screenshot` | No `--out`; screenshots return base64 (use `--json` for structured output) |
+| `cmux browser eval "..."` | `get text` / `get html` / `snapshot` / `console list` | **Broken upstream** (manaflow-ai/cmux#2610) |
+| `cmux browser press <key>` | `click` / `type` / `fill`, or drive the API with `curl` | **Broken upstream** (manaflow-ai/cmux#2610) |
+| `cmux browser addscript <script>` | No workaround | **Broken upstream** (manaflow-ai/cmux#2610) |
+| `http://localhost:...` in the browser | `http://127.0.0.1:...` | Embedded browser can't resolve `localhost` |
+
+If something in this table seems too cautious, sanity-check against the live CLI (`cmux <subcommand> --help`) before assuming the docs are wrong. The patterns here came from real failures.
+
+## Opening a Browser
+
+There are two ways to get a browser surface, and they solve different problems. Pick by intent:
+
+1. **`cmux new-pane --type browser --direction <dir> [--url <url>]`** — use when you care about *placement*. Creates a new pane in the direction you specify and puts a browser surface inside it. This is the right choice for "open a browser to the right" or "put a browser below this pane".
+
+2. **`cmux browser open [url]`** — use when you just want *a browser surface somewhere*. Reuses an existing browser surface in the workspace when one exists (prints `placement=reuse`) and creates one if needed. It prints the surface id on success, which you can capture and pass to subsequent `cmux browser --surface <id> ...` commands:
+   ```bash
+   cmux browser open http://127.0.0.1:3000
+   # OK surface=surface:10 pane=pane:5 placement=reuse
+   ```
+
+**Never use `cmux new-split` for browsers.** `new-split` always creates terminals — there is no `--browser` flag. This is the single most common cmux mistake.
+
 ## Proactive Behaviors
 
-When running inside cmux, automatically do these things without being asked:
+The sidebar is cmux's superpower. Use it — but only when it genuinely helps the user. Noise in the sidebar is worse than silence, because users tune it out.
 
-**Workspace color sync** — When a Claude Code session starts inside cmux, set the workspace color to match Claude Code's theme color so the user can visually identify which workspaces have active CC sessions:
-```bash
-cmux workspace-action --action set-color --color Purple
-```
-If the user has already set a workspace color, respect it — don't override their choice. Only set the color if the workspace doesn't already have one. Clear the color when the session ends if you were the one who set it.
+**When to proactively use the sidebar:**
 
-**Progress feedback** — For any task that takes more than a few seconds (builds, test suites, deployments, large refactors), show progress in the sidebar:
+- **Explicitly long-running work**: full builds, full test suites, deploys, large migrations, long linting runs, multi-minute refactors. If the task is likely to take ~30 seconds or more, sidebar feedback is valuable.
+- **Work the user said they'd walk away from**: "I'm switching to another workspace, let me know when it's done" → notifications and progress are obviously wanted.
+- **Multi-agent orchestration**: when you're coordinating work across multiple panes, per-agent status pills tell the user at a glance which agents are running, done, or failed.
+
+**When NOT to use the sidebar:**
+
+- Short tool calls (reads, small edits, single commands). Don't wrap `npm install` of a handful of packages in progress bars.
+- Anything the user can see happening in front of them in the same pane.
+- Cosmetic touches they didn't ask for. In particular, **don't set a workspace color on session start unless the user asked for one** — if they wanted one they'd have set it. You may *suggest* it, but don't do it silently.
+
+### The core feedback primitives
+
+**Progress + status for long work:**
 ```bash
 cmux set-status task "building" --icon hammer --color "#ff9500"
 cmux set-progress 0.3 --label "Running tests (12/40)..."
-```
-Clear them when done:
-```bash
+# ... when done
 cmux clear-progress
 cmux clear-status task
 ```
 
-**Completion notifications** — When a long-running task finishes, notify the user so they see it even if they're focused on another workspace:
+**Completion notifications** when the user is likely elsewhere:
 ```bash
 cmux notify --title "Tests passed" --body "All 40 tests green in 23s"
 cmux log --level success "Tests passed (40/40)"
 ```
 
-**Error alerts** — When something fails, make it visible:
+**Error alerts** with clear labels:
 ```bash
 cmux notify --title "Build failed" --body "TypeScript error in src/auth.ts:42"
 cmux log --level error --source build "TypeScript error in src/auth.ts:42"
 cmux set-status task "failed" --icon xmark --color "#ff3b30"
 ```
 
-**Task logging** — Log significant milestones so the sidebar tells a story:
+**Milestone logging** when orchestrating a multi-step task — the sidebar log becomes a timeline of what happened:
 ```bash
 cmux log "Starting deployment to staging"
 cmux log --level progress "Migrating database..."
 cmux log --level success "Deployment complete"
 ```
 
-## CLI Reference
+Always clean up (`clear-progress`, `clear-status <key>`) when the task finishes, so the sidebar reflects current state rather than accumulated debris.
 
-All commands use the `cmux` CLI. IDs can be UUIDs, short refs (`window:1`, `workspace:2`, `pane:3`, `surface:4`), or indexes.
+## Core Commands
 
-### Workspaces
+The patterns below cover ~90% of real cmux use. For exhaustive subcommand listings, see `api-reference.md`.
 
-Workspaces are the top-level organizational unit — each appears as a tab in the sidebar.
+### Discovering the layout
 
-```bash
-cmux list-workspaces                           # List all workspaces
-cmux new-workspace [--name <title>] [--cwd <path>] [--command <text>]  # Create workspace
-cmux current-workspace                         # Get current workspace info
-cmux select-workspace --workspace <id|ref>     # Switch to a workspace
-cmux close-workspace --workspace <id|ref>      # Close a workspace
-cmux rename-workspace [--workspace <id|ref>] <title>  # Rename a workspace
-cmux reorder-workspace --workspace <id|ref> (--index <n> | --before <id|ref> | --after <id|ref>)
-```
+`cmux tree` is your primary discovery tool. It prints the full hierarchy with surface IDs, types, and titles — use it before sending to a surface you haven't addressed yet, and any time the layout may have changed.
 
-**Workspace actions** — context-menu operations including color:
-```bash
-cmux workspace-action --action set-color --color <name|#hex> [--workspace <id|ref>]
-cmux workspace-action --action clear-color [--workspace <id|ref>]
-cmux workspace-action --action pin [--workspace <id|ref>]
-cmux workspace-action --action unpin [--workspace <id|ref>]
-cmux workspace-action --action rename --title <text> [--workspace <id|ref>]
-```
-
-Named colors: `Red`, `Crimson`, `Orange`, `Amber`, `Olive`, `Green`, `Teal`, `Aqua`, `Blue`, `Navy`, `Indigo`, `Purple`, `Magenta`, `Rose`, `Brown`, `Charcoal`
-
-Colors also accept `#RRGGBB` hex values for exact matching.
-
-### Windows
-
-```bash
-cmux list-windows                              # List all windows
-cmux current-window                            # Get current window
-cmux new-window                                # Create a new window
-cmux focus-window --window <id>                # Focus a window
-cmux close-window --window <id>                # Close a window
-cmux move-workspace-to-window --workspace <id|ref> --window <id|ref>
-```
-
-### Panes and Surfaces
-
-Panes contain surfaces. A pane can hold multiple surfaces (tabs). Split the current pane in any direction.
-
-```bash
-cmux new-split <left|right|up|down> [--workspace <id|ref>] [--surface <id|ref>]
-cmux new-pane [--type <terminal|browser>] [--direction <left|right|up|down>] [--workspace <id|ref>] [--url <url>]
-cmux new-surface [--type <terminal|browser>] [--pane <id|ref>] [--workspace <id|ref>] [--url <url>]
-cmux list-panes [--workspace <id|ref>]         # List panes
-cmux list-pane-surfaces [--workspace <id|ref>] [--pane <id|ref>]  # List surfaces in a pane
-cmux tree [--all] [--workspace <id|ref>]       # Show full hierarchy
-cmux focus-pane --pane <id|ref> [--workspace <id|ref>]
-cmux close-surface [--surface <id|ref>] [--workspace <id|ref>]
-cmux resize-pane --pane <id|ref> [--workspace <id|ref>] (-L|-R|-U|-D) [--amount <n>]
-```
-
-### Surface / Tab Management
-
-Surfaces appear as tabs within panes. You can rename them, reorder them, move them between panes, and perform context-menu actions.
-
-```bash
-cmux rename-tab <title>                        # Rename current surface's tab
-cmux rename-tab --surface <id|ref> <title>     # Rename a specific surface's tab
-cmux tab-action --action <name> [--tab <id|ref>] [--surface <id|ref>] [--workspace <id|ref>]
-```
-
-Tab actions: `rename`, `clear-name`, `close-left`, `close-right`, `close-others`, `new-terminal-right`, `new-browser-right`, `reload`, `duplicate`, `pin`, `unpin`, `mark-unread`
-
-```bash
-cmux move-surface --surface <id|ref> [--pane <id|ref>] [--before <id|ref>] [--after <id|ref>] [--index <n>]
-cmux reorder-surface --surface <id|ref> (--index <n> | --before <id|ref> | --after <id|ref>)
-cmux surface-health [--workspace <id|ref>]     # Check surface health status
-cmux refresh-surfaces                          # Refresh surface snapshots for focused workspace
-```
-
-### Sending Input
-
-Send text or keypresses to any surface. This is the key to multi-agent orchestration — you can type commands into other panes programmatically. Use `--surface` to target a specific pane.
-
-```bash
-cmux send "echo hello"                         # Send text to current surface
-cmux send --surface <id|ref> "echo hello"      # Send text to specific surface
-cmux send-key enter                            # Send keypress to current surface
-cmux send-key --surface <id|ref> enter         # Send keypress to specific surface
-cmux send-panel --panel <id|ref> "text"        # Send to a panel
-cmux send-key-panel --panel <id|ref> <key>     # Send key to a panel
-```
-
-Available keys: `enter`, `tab`, `escape`, `backspace`, `delete`, `up`, `down`, `left`, `right`
-
-When sending commands to execute, the text is sent as typed input — follow with `cmux send-key enter` if you need to press Enter, or include `\n` in the text.
-
-### Reading Screen Content
-
-Read what's currently displayed in any terminal pane — useful for monitoring agent output.
-
-```bash
-cmux read-screen                               # Read current surface
-cmux read-screen --surface <id|ref>            # Read specific surface
-cmux read-screen --scrollback                  # Include scrollback buffer
-cmux read-screen --lines 50                    # Last N lines
-```
-
-### Notifications
-
-Notifications appear as rings around panes and badges in the sidebar — they're how you get the user's attention across workspaces.
-
-```bash
-cmux notify --title "Title" --body "Body"
-cmux notify --title "Title" --subtitle "Sub" --body "Body"
-cmux notify --title "Title" --body "Body" --workspace <id|ref> --surface <id|ref>
-cmux list-notifications
-cmux clear-notifications
-```
-
-### Sidebar Metadata
-
-The sidebar shows rich status information per workspace. Use these to give the user at-a-glance visibility into what you're doing.
-
-**Status pills** — Small labeled badges. Use a unique key per tool/concern so they don't collide:
-```bash
-cmux set-status build "compiling" --icon hammer --color "#ff9500"
-cmux set-status tests "running" --icon checkmark --color "#007aff"
-cmux clear-status build
-cmux list-status
-```
-
-**Progress bar** — A single progress bar (0.0 to 1.0) with an optional label:
-```bash
-cmux set-progress 0.5 --label "Building... (50%)"
-cmux clear-progress
-```
-
-**Log entries** — A scrollable log in the sidebar. Levels: info, progress, success, warning, error:
-```bash
-cmux log "Starting task"
-cmux log --level progress --source build "Compiling modules..."
-cmux log --level success "All done"
-cmux log --level error --source tests "3 failures"
-cmux clear-log
-cmux list-log --limit 10
-```
-
-**Full sidebar dump:**
-```bash
-cmux sidebar-state [--workspace <id|ref>]
-```
-
-### Browser Automation
-
-cmux has an embedded browser with an automation API. Create browser panes and control them programmatically.
-
-**IMPORTANT: `--surface` must come BEFORE the subcommand name.** Placing `--surface` after the subcommand fails with `browser requires a subcommand`. The correct pattern is:
-```
-cmux browser [--surface <id|ref>] <subcommand> [subcommand-args]
-```
-
-**IMPORTANT: Use `127.0.0.1`, not `localhost`.** The embedded browser cannot resolve `localhost` and shows "This page couldn't load." Always substitute `127.0.0.1` in URLs passed to `open`, `goto`, and similar commands:
-```bash
-# BROKEN
-cmux browser open http://localhost:3000
-
-# WORKS
-cmux browser open http://127.0.0.1:3000
-```
-
-**KNOWN BUG — `eval`, `press`, and `addscript` are currently broken** (manaflow-ai/cmux#2610, confirmed on cmux 0.63.0 stable and 0.63.1 nightly). Every invocation — even trivial ones like `cmux browser eval "1"` — returns `Error: js_error: A JavaScript exception occurred` with exit code 1. Read-only commands (`get`, `click`, `snapshot`, `console list`, `errors list`) work fine on the same surface. Until the bug is fixed:
-
-- **Don't use `eval`** for inspection — use `get text`, `get html`, `get title`, `snapshot`, or `console list` / `errors list` instead.
-- **Don't use `press`** for keyboard input — use `click`, `type`, or `fill` on the target element, or drive the underlying API directly with `curl`.
-- **Don't use `addscript`.**
-
-```bash
-cmux browser open [url]                        # Open/reuse a browser surface; prints surface id
-cmux browser open-split [url]                  # Explicit split
-cmux browser goto <url> [--snapshot-after]     # Navigate
-cmux browser back|forward|reload [--snapshot-after]
-cmux browser snapshot [--interactive] [--compact]  # Accessibility tree — primary inspection tool
-cmux browser click <selector> [--snapshot-after]
-cmux browser type <selector> <text> [--snapshot-after]
-cmux browser fill <selector> [text] [--snapshot-after]
-cmux browser screenshot [--json]               # Returns base64 PNG (no --out flag)
-cmux browser wait [--selector <css>] [--text <text>] [--url-contains <text>] [--timeout-ms <ms>]
-cmux browser get <url|title|text|html|value|attr|count|box|styles> [...]
-cmux browser is <visible|enabled|checked> <selector>
-cmux browser console <list|clear>              # Read/clear captured console messages
-cmux browser errors <list|clear>               # Read/clear captured page errors
-cmux browser tab <new|list|switch|close|<index>> [...]
-# BROKEN (manaflow-ai/cmux#2610): eval, press, addscript — all fail with js_error
-```
-
-When targeting a browser in another pane, always put `--surface` first:
-```bash
-# Correct
-cmux browser --surface surface:3 snapshot
-cmux browser --surface surface:3 screenshot
-cmux browser --surface surface:3 click '#submit-btn'
-cmux browser --surface surface:3 get title
-
-# Wrong — fails with "browser requires a subcommand"
-cmux browser snapshot --surface surface:3
-```
-
-**Finding browser surfaces.** There is no `list-surfaces` command — use `cmux tree` to discover browser surface IDs:
 ```bash
 cmux tree
 # pane pane:5
@@ -277,71 +144,101 @@ cmux tree
 #   └── surface surface:10 [browser] "MDLZ" [selected] http://127.0.0.1:3000/
 ```
 
-`cmux browser open <url>` reuses an existing browser surface in the workspace when one exists (prints `placement=reuse`) and prints the surface id on success, so you can capture it for subsequent commands:
+There is no `list-surfaces` command — `cmux tree` is how you enumerate them.
+
+### Splitting panes
+
 ```bash
-cmux browser open http://127.0.0.1:3000
-# OK surface=surface:10 pane=pane:5 placement=reuse
+cmux new-split <left|right|up|down> [--surface <id|ref>]    # terminal
+cmux new-pane --type browser --direction <dir> [--url <url>] # browser
 ```
 
-#### Inspection: `snapshot`, `get`, `console list`, `errors list`
+Don't blindly split in the same direction every time — that creates unusably narrow or short panes. Before splitting, check the current layout with `cmux tree` and choose a direction that makes sense. See "Intelligent Splitting" below.
 
-With `eval` broken (manaflow-ai/cmux#2610), inspection relies on the read-only commands.
+### Sending input to other surfaces
 
-`snapshot` returns a structured accessibility tree — the fastest way to understand page state. `--interactive` assigns refs to clickable elements:
+This is the key to multi-agent orchestration. Use `--surface` to target a specific pane:
+
 ```bash
-cmux browser --surface surface:10 snapshot
-cmux browser --surface surface:10 snapshot --interactive
+cmux send --surface surface:2 "npm run dev"
+cmux send-key --surface surface:2 enter
 ```
 
-`get` extracts specific fields from the page without running JS:
+Text is sent as typed input. Follow with `send-key enter` if you need to press Enter, or include `\n` in the text. Available keys: `enter`, `tab`, `escape`, `backspace`, `delete`, `up`, `down`, `left`, `right`.
+
+**Not `send-surface` or `send-key-surface`** — those aren't real commands. `--surface` is a flag.
+
+### Reading what's on another screen
+
 ```bash
-cmux browser --surface surface:10 get title
-cmux browser --surface surface:10 get url
-cmux browser --surface surface:10 get text "body"       # Visible text of an element
-cmux browser --surface surface:10 get text "h1"
-cmux browser --surface surface:10 get html "#root"      # Inner HTML of an element
-cmux browser --surface surface:10 get value "input[name=email]"
-cmux browser --surface surface:10 get attr "a.primary" "href"
-cmux browser --surface surface:10 get count "button"    # How many elements match
+cmux read-screen --surface surface:2 --lines 50       # last 50 lines
+cmux read-screen --surface surface:2 --scrollback     # include scrollback
 ```
 
-`console list` and `errors list` return messages and page errors that the browser has captured — use these instead of trying to read `console.log` output through `eval`:
+Useful for monitoring another agent's output, diagnosing a failure in another pane, or confirming a command completed.
+
+### Notifications and sidebar
+
 ```bash
-cmux browser --surface surface:10 console list
-cmux browser --surface surface:10 errors list
-cmux browser --surface surface:10 console clear         # Reset before an action to isolate new messages
+cmux notify --title "Title" --body "Body" [--subtitle "..."] [--workspace <id>] [--surface <id>]
+cmux set-status <key> "<value>" --icon <name> --color "#hex"
+cmux clear-status <key>
+cmux set-progress <0.0-1.0> --label "..."
+cmux clear-progress
+cmux log [--level info|progress|success|warning|error] [--source <name>] "message"
 ```
 
-#### Clicking: use CSS selectors, beware React
+Use a **unique key per concern** for status pills (`build`, `tests`, `deploy`) so they don't collide. Progress is a single global bar — don't interleave progress bars from different tasks.
 
-Two important caveats for `click`:
+## Browser Automation
+
+cmux has an embedded browser with an automation API. Three rules that catch most mistakes:
+
+1. **`--surface` comes BEFORE the subcommand.** `cmux browser --surface surface:10 snapshot` works. `cmux browser snapshot --surface surface:10` fails with `browser requires a subcommand`.
+
+2. **Use `127.0.0.1`, not `localhost`.** The embedded browser cannot resolve `localhost` and shows "This page couldn't load." Substitute `127.0.0.1` in every URL you pass to `open`, `goto`, etc.:
+   ```bash
+   # BROKEN
+   cmux browser open http://localhost:3000
+   # WORKS
+   cmux browser open http://127.0.0.1:3000
+   ```
+
+3. **`eval`, `press`, and `addscript` are currently broken upstream (manaflow-ai/cmux#2610).** Every invocation — even `cmux browser eval "1"` — returns `Error: js_error: A JavaScript exception occurred`. Read-only commands (`get`, `click`, `snapshot`, `console list`, `errors list`) work fine on the same surface. Until the bug is fixed, use these substitutes:
+   - Instead of `eval` → `get text`, `get html`, `get title`, `snapshot`, `console list`, `errors list`
+   - Instead of `press` → `click`, `type`, `fill`, or drive the underlying API with `curl`
+   - Instead of `addscript` → no workaround; wait for the fix
+
+### Inspection primitives (the ones that work)
+
+```bash
+cmux browser --surface <id> snapshot [--interactive]   # accessibility tree
+cmux browser --surface <id> get title
+cmux browser --surface <id> get url
+cmux browser --surface <id> get text "body"            # visible text of an element
+cmux browser --surface <id> get html "#root"           # inner HTML of an element
+cmux browser --surface <id> get value "input[name=email]"
+cmux browser --surface <id> get attr "a.primary" "href"
+cmux browser --surface <id> get count "button"
+cmux browser --surface <id> console list               # captured console messages
+cmux browser --surface <id> errors list                # captured page errors
+```
+
+`snapshot` returns a structured accessibility tree — the fastest way to understand page state. `--interactive` assigns refs to clickable elements, but see the next section: those refs are fragile.
+
+### Interacting with pages — two caveats
 
 1. **CSS selectors are more reliable than ref selectors.** Refs from `snapshot --interactive` expire between snapshots and frequently fail with "Element not found". Prefer CSS:
    ```bash
    # Reliable
    cmux browser --surface surface:10 click "button:nth-child(5)" --snapshot-after
-
    # Often fails
    cmux browser --surface surface:10 click '[ref=e12]'
    ```
 
-2. **Synthetic clicks may not trigger React state changes.** `cmux browser click` (and JS `element.click()` / dispatched MouseEvents) often do not propagate through React's synthetic event system, so tab switches and other React-controlled UI interactions may appear to do nothing. For inspection and error diagnosis this is fine; for *interaction* with React apps, automation is limited — fall back to hitting the underlying APIs with `curl`.
+2. **Synthetic clicks may not trigger React state changes.** `cmux browser click` (and `element.click()` / dispatched MouseEvents) often do not propagate through React's synthetic event system, so tab switches and other React-controlled interactions can silently do nothing. For inspection this is fine; for *interaction* with React apps, fall back to hitting the underlying APIs with `curl`.
 
-#### Unsupported / removed / broken commands
-
-Don't use any of these — the first two don't exist, the third has a positional/flag gotcha, and the rest are currently broken upstream:
-
-| Don't use | Use instead |
-|-----------|-------------|
-| `cmux list-surfaces` / `cmux list-surfaces --json` | `cmux tree` |
-| `cmux browser navigate <url>` | `cmux browser goto <url>` |
-| `cmux browser screenshot --out <path>` | `cmux browser --surface <id> screenshot` (returns base64) or `--json` |
-| `cmux browser screenshot` (without `--surface` first) | `cmux browser --surface <id> screenshot` |
-| `cmux browser eval <script>` — **broken** (manaflow-ai/cmux#2610) | `get text` / `get html` / `snapshot` / `console list` / `errors list` |
-| `cmux browser press <key>` — **broken** (manaflow-ai/cmux#2610) | `click` / `type` / `fill`, or hit the API directly with `curl` |
-| `cmux browser addscript <script>` — **broken** (manaflow-ai/cmux#2610) | No workaround; wait for the fix |
-
-#### Browser debugging workflow
+### Debugging workflow
 
 When something is broken in a web app running in a cmux browser surface:
 
@@ -350,117 +247,54 @@ When something is broken in a web app running in a cmux browser surface:
 3. **Check visible text:** `cmux browser --surface <id> get text "body"`
 4. **Check captured console output:** `cmux browser --surface <id> console list`
 5. **Check captured page errors:** `cmux browser --surface <id> errors list`
-6. **If the page won't load at all, try `127.0.0.1` instead of `localhost`.**
-7. **For API errors, use `curl` directly** — and note that even if you wanted to drive the React UI through automation, `eval` and `press` are currently broken (manaflow-ai/cmux#2610), so API-level testing is the robust path.
-
-### Utility
-
-```bash
-cmux ping                                      # Check if cmux is responsive
-cmux capabilities                              # List available methods
-cmux identify [--workspace <id|ref>] [--surface <id|ref>]  # Show context
-cmux version                                   # Show version
-cmux tree --all                                # Full hierarchy of all windows/workspaces/panes/surfaces
-cmux find-window [--content] [--select] <query>  # Search across windows
-```
-
-### Hooks
-
-Set up event-driven automation:
-```bash
-cmux set-hook <event> <command>                # Register a hook
-cmux set-hook --list                           # List hooks
-cmux set-hook --unset <event>                  # Remove a hook
-```
-
-### Clipboard / Buffers
-
-```bash
-cmux set-buffer [--name <name>] <text>
-cmux list-buffers
-cmux paste-buffer [--name <name>] [--workspace <id|ref>] [--surface <id|ref>]
-```
-
-### tmux Compatibility
-
-cmux provides tmux-compatible commands for scripts that expect tmux:
-```bash
-cmux capture-pane [--scrollback] [--lines <n>]  # Alias for read-screen
-cmux swap-pane --pane <id|ref> --target-pane <id|ref>
-cmux break-pane [--workspace <id|ref>] [--pane <id|ref>]
-cmux join-pane --target-pane <id|ref>
-cmux next-window | previous-window | last-window
-cmux last-pane
-cmux respawn-pane [--command <cmd>]
-```
-
-### Global Flags
-
-These work on most commands:
-
-| Flag | Purpose |
-|------|---------|
-| `--workspace <id\|ref>` | Target a specific workspace |
-| `--surface <id\|ref>` | Target a specific surface |
-| `--pane <id\|ref>` | Target a specific pane |
-| `--window <id\|ref>` | Target a specific window |
-| `--id-format refs\|uuids\|both` | Control identifier format in output |
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `CMUX_WORKSPACE_ID` | Auto-set: current workspace ID, used as default `--workspace` |
-| `CMUX_SURFACE_ID` | Auto-set: current surface ID, used as default `--surface` |
-| `CMUX_TAB_ID` | Optional: used by tab-action/rename-tab as default `--tab` |
-| `CMUX_SOCKET_PATH` | Override socket path (default: `~/Library/Application Support/cmux/cmux.sock`) |
-| `CMUX_SOCKET_PASSWORD` | Socket auth password (if required) |
+6. **If the page won't load at all**, try `127.0.0.1` instead of `localhost`.
+7. **For API-level bugs, use `curl` directly** — and remember `eval`/`press` are currently broken (manaflow-ai/cmux#2610), so API-level testing is the robust path.
 
 ## Intelligent Splitting
 
-Don't blindly split in the same direction every time — that creates unusably narrow or short panes. Before splitting, check the current layout with `cmux tree` and choose the direction that makes sense.
+Don't blindly split in the same direction every time — that creates unusably narrow or short panes. Before splitting, `cmux tree` and read the shape:
 
-**Rules of thumb:**
+- **1 pane** → single full-screen. Split right for a natural side-by-side.
+- **2 panes, side-by-side** → already left/right. Split one of them down for an L-shape.
+- **2 panes, stacked** → already top/bottom. Split one right to avoid a third vertical slice.
+- **3+ panes** → the workspace is getting crowded. Prefer a **new workspace** over another split:
+  ```bash
+  cmux new-workspace --name "agent-4" --cwd /path/to/project
+  ```
 
-1. **Check the layout first.** Run `cmux tree` to see what panes already exist. If there's already a right split, split down (or vice versa). Avoid splitting a pane that's already small.
+**Match surface type to position:**
 
-2. **Alternate directions.** If the workspace has one pane, split right (side-by-side is the most natural starting point). For a third pane, split one of the existing panes down to create an L-shape. For four panes, aim for a 2x2 grid.
+- **Terminals with scrolling output** (servers, logs, test watchers) → vertical splits are fine (tall and narrow works for log lines)
+- **Browsers and editors** → need horizontal width; split right, not down
+- **Monitoring / quick-glance** → bottom splits (wide and short)
 
-3. **Match the purpose to the position:**
-   - **Dev servers / long-running processes** → right split (tall, narrow is fine for scrolling output)
-   - **Logs / test output** → bottom split (wide, short works well for log lines)
-   - **Secondary agent / editor** → right split (needs width for code)
-   - **Quick commands / monitoring** → bottom split
+**Respect user intent.** If the user rearranged panes since your last check, treat their layout as intentional: if they widened a pane, don't split it; if they closed one of yours, don't recreate it; if they moved a browser left, put new terminals on the right.
 
-4. **Don't over-split.** Three panes in one workspace is usually the practical maximum before things get cramped. If you need a fourth agent, consider a new workspace instead:
-   ```bash
-   cmux new-workspace --name "agent-4" --cwd /path/to/project
-   ```
+When in doubt on a complex layout (4+ panes), ask the user rather than guessing wrong.
 
-5. **Example: setting up a dev environment:**
-   ```bash
-   # Start with one pane (your coding session)
-   # Add dev server to the right
-   cmux new-split right
-   cmux send --surface surface:2 "npm run dev"
-   cmux send-key --surface surface:2 enter
+**Example — setting up a dev environment:**
+```bash
+# Start with one pane (your coding session). Add dev server to the right:
+cmux new-split right
+cmux send --surface surface:2 "npm run dev"
+cmux send-key --surface surface:2 enter
 
-   # Add test watcher below the dev server
-   cmux new-split down --surface surface:2
-   cmux send --surface surface:3 "npm test -- --watch"
-   cmux send-key --surface surface:3 enter
+# Add test watcher below the dev server:
+cmux new-split down --surface surface:2
+cmux send --surface surface:3 "npm test -- --watch"
+cmux send-key --surface surface:3 enter
 
-   # Result: code on left, dev server top-right, tests bottom-right
-   ```
+# Result: code on left, dev server top-right, tests bottom-right
+```
 
 ## Multi-Agent Orchestration
 
-One of cmux's most powerful uses is coordinating multiple AI agents. Here's the pattern:
+One of cmux's most powerful uses is coordinating multiple AI agents across panes. The pattern:
 
 1. **Create panes** for each agent:
    ```bash
    cmux new-split right
-   cmux tree  # see the full hierarchy with surface IDs
+   cmux tree                            # see the full hierarchy with surface IDs
    ```
 
 2. **Launch agents** in each pane:
@@ -474,93 +308,22 @@ One of cmux's most powerful uses is coordinating multiple AI agents. Here's the 
    cmux read-screen --surface surface:2 --lines 20
    ```
 
-4. **Update sidebar** with per-agent status:
+4. **Per-agent status pills** so the sidebar tells the whole story at a glance:
    ```bash
    cmux set-status auth "running" --icon hammer --color "#007aff"
    cmux set-status db "done" --icon checkmark --color "#34c759"
    ```
 
-5. **Notify when done**:
+5. **Notify when done:**
    ```bash
    cmux notify --title "All agents complete" --body "Auth, DB, and API modules ready"
    ```
 
-## Active Polling — Detecting Changes
+### Polling vs. waiting
 
-cmux surfaces are dynamic — the user can rearrange panes, rename tabs, or change workspace colors at any time. When orchestrating multi-agent workflows or maintaining awareness of the environment, poll the cmux state periodically to detect changes and adapt.
+For long-running orchestration where you need to react to changes, poll `cmux tree` at reasonable intervals (every 5-15 seconds, not more). When a layout change is detected, re-resolve surface IDs and don't blindly proceed with your original plan — the user may have rearranged or closed panes, which is a signal about intent.
 
-### What to poll and when
-
-**Layout changes** — The user may drag panes to rearrange, split, or close surfaces. Poll `cmux tree` to detect when pane structure changes:
-```bash
-cmux tree [--workspace <id|ref>]
-```
-Compare against a previous snapshot to detect new/removed/reordered panes and surfaces.
-
-**Surface renames** — The user can rename tabs manually. Poll `cmux list-pane-surfaces` or `cmux tree` to notice when surface titles change:
-```bash
-cmux list-pane-surfaces [--workspace <id|ref>]
-```
-If you're tracking surfaces by name (e.g., "build-agent", "test-runner"), re-resolve names after detecting a rename.
-
-**Workspace color changes** — Workspaces can have a color set by the user or programmatically. Currently, `cmux tree` output does not include color — use `cmux workspace-action` to set/clear colors, and track your own color state.
-
-### Polling patterns
-
-For long-running orchestration tasks, poll at reasonable intervals (every 5-15 seconds). Don't poll more frequently than needed — cmux commands are fast but unnecessary polling adds noise.
-
-```bash
-# Snapshot the layout at the start of a multi-agent task
-LAYOUT_BEFORE=$(cmux tree --workspace "$CMUX_WORKSPACE_ID")
-
-# ... later, check for changes
-LAYOUT_NOW=$(cmux tree --workspace "$CMUX_WORKSPACE_ID")
-if [ "$LAYOUT_BEFORE" != "$LAYOUT_NOW" ]; then
-  # Layout changed — re-resolve surface IDs, adapt orchestration
-fi
-```
-
-When a layout change is detected:
-1. **Re-resolve surface IDs** — A surface you were targeting may have moved to a different pane
-2. **Check for closed surfaces** — An agent's surface may have been closed by the user
-3. **Re-evaluate layout before acting** — Don't blindly proceed with your original plan. Re-read the Intelligent Splitting rules and apply them to the *current* layout, not the one you started with.
-
-### Informed Layout Decisions
-
-Every time you're about to create a pane — whether at the start of a task or after detecting a layout change — run `cmux tree` and reason about the result before acting. The tree tells you everything you need:
-
-**Read the shape.** Count panes and infer the geometry:
-- 1 pane → single full-screen. Split right for side-by-side.
-- 2 panes, both top-level children → side-by-side (left/right). Split one of them down for an L-shape.
-- 2 panes, one nested under the other → stacked (top/bottom). Split one right to avoid a third vertical slice.
-- 3+ panes → workspace is getting crowded. Prefer a new workspace over another split.
-
-**Respect user intent.** If the user rearranged panes since your last check, treat their layout as intentional:
-- If they widened a pane, they want space there — don't split it.
-- If they moved a browser pane to the left, split new terminals to the right.
-- If they closed a pane you created, don't recreate it.
-
-**Match surface type to position.** When choosing where to place a new surface:
-- Terminals with scrolling output (servers, logs, test watchers) → prefer vertical splits (tall and narrow is fine)
-- Browsers and editors → prefer horizontal space (split right, not down)
-- Monitoring / quick-glance surfaces → bottom splits (wide and short)
-
-**Example — adapting to a detected change:**
-```bash
-# You started with 2 panes side-by-side and planned to add a third on the right.
-# But the user dragged the layout into a top/bottom stack.
-TREE=$(cmux tree)
-
-# Now top/bottom — adding another right split would create 3 columns.
-# Instead, split the bottom pane right to get a 1-over-2 layout:
-cmux new-split right --surface surface:3
-```
-
-**When in doubt, ask.** If the layout is complex (4+ panes) and you're unsure where to put something, ask the user rather than guessing wrong and disrupting their arrangement.
-
-### Synchronization with wait-for
-
-For coordinated multi-agent workflows, use `cmux wait-for` instead of polling when you need to synchronize on specific events:
+For strict synchronization between agents, prefer `cmux wait-for` over polling:
 ```bash
 # Agent A signals completion
 cmux wait-for --signal "auth-done"
@@ -576,3 +339,9 @@ cmux wait-for "auth-done" --timeout 60
 - Choose log levels meaningfully: `info` for milestones, `progress` for ongoing work, `success`/`error` for outcomes, `warning` for things that need attention but aren't failures
 - Clean up after yourself: clear progress bars and status pills when tasks finish
 - Use `--source` on log entries when multiple subsystems are active so the user can tell them apart
+
+## Where to go for more
+
+- **`api-reference.md`** (in this skill directory) — exhaustive CLI listing: every subcommand, every flag, tmux compat, hooks, clipboard/buffers, global flags, environment variables.
+- **`cmux --help`** / **`cmux <subcommand> --help`** — authoritative and always current. If something in these docs doesn't match the live CLI, trust the CLI.
+- **`cmux capabilities --json`** — machine-readable list of every method cmux exposes; useful when you suspect a command exists but can't remember its exact name.
