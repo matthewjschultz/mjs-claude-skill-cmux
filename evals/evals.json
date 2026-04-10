@@ -10,13 +10,43 @@
     {
       "id": 2,
       "prompt": "Open a new pane to the right and start a dev server with `npm run dev` in it. I want to keep coding in this pane.",
-      "expected_output": "Claude should use cmux new-split right, get the new surface ID, then cmux send-surface to run the dev server command in the new pane.",
+      "expected_output": "Claude should use cmux new-split right, then cmux tree (or capture the output of new-split) to get the new surface ID, then `cmux send --surface <id> \"npm run dev\"` followed by `cmux send-key --surface <id> enter` to start the dev server. Must NOT use `cmux send-surface` (non-existent command).",
       "files": []
     },
     {
       "id": 3,
       "prompt": "I've got claude code agents running in 3 different panes working on auth, database, and API modules. Can you set up the sidebar to track their progress and alert me when any of them finishes or hits an error?",
-      "expected_output": "Claude should use cmux tree to find the panes, set up status pills for each agent, use cmux log to track milestones, and explain how notifications will fire on completion/error.",
+      "expected_output": "Claude should use cmux tree to find the panes, set up status pills for each agent (one unique key per agent), use cmux log to track milestones, and explain how notifications will fire on completion/error.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Open a browser to the right of my current pane and point it at the dev server on port 3000.",
+      "expected_output": "Claude should use `cmux new-pane --type browser --direction right --url http://127.0.0.1:3000` (or equivalent). It must NOT use `cmux new-split right --browser` (no such flag) or `cmux new-split right` (that creates a terminal, not a browser). It must use `127.0.0.1`, not `localhost`.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Send `git pull && npm install` to surface 5, then press enter.",
+      "expected_output": "Claude should use `cmux send --surface surface:5 \"git pull && npm install\"` followed by `cmux send-key --surface surface:5 enter`. Must NOT use `cmux send-surface` or `cmux send-key-surface`.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "What's currently displayed in my other terminal pane? I want to see the last 50 lines without switching to it.",
+      "expected_output": "Claude should use `cmux tree` to identify the other surface, then `cmux read-screen --surface <id> --lines 50`. It should not attempt to switch panes or use an invented `cmux list-surfaces` command.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "Open localhost:3000 in the cmux browser and tell me what the page title is.",
+      "expected_output": "Claude should substitute `http://127.0.0.1:3000` for `localhost:3000` when calling `cmux browser open` (or `cmux browser goto`), then use `cmux browser --surface <id> get title` to read the title. It should explain the localhost->127.0.0.1 substitution.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "Run some JavaScript in the cmux browser to grab `document.querySelectorAll('button').length` and tell me the count.",
+      "expected_output": "Claude should recognize that `cmux browser eval` is currently broken upstream (manaflow-ai/cmux#2610) and use the read-only alternative `cmux browser --surface <id> get count \"button\"` instead. It should explain why `eval` is not being used.",
       "files": []
     }
   ]
