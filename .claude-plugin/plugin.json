@@ -1,7 +1,7 @@
 {
   "name": "cmux",
   "description": "Claude Code integration for the cmux terminal multiplexer — workspace management, pane splitting, notifications, sidebar status, browser automation, and multi-agent orchestration",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "Matthew Schultz"
   },
