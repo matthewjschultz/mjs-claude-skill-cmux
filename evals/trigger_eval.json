@@ -8,7 +8,7 @@
     "should_trigger": true
   },
   {
-    "query": "I've got 4 claude code agents going in different panes â€” one doing the auth refactor, one on the DB migration, one writing API tests, and one updating docs. Set up monitoring so I can see which ones are done and which are still running without switching between them.",
+    "query": "I've got 4 claude code agents going in different panes — one doing the auth refactor, one on the DB migration, one writing API tests, and one updating docs. Set up monitoring so I can see which ones are done and which are still running without switching between them.",
     "should_trigger": true
   },
   {
@@ -20,7 +20,7 @@
     "should_trigger": true
   },
   {
-    "query": "create 3 new workspaces for me â€” one for the frontend repo, one for the backend, and one for infra. I want to run separate agents in each.",
+    "query": "create 3 new workspaces for me — one for the frontend repo, one for the backend, and one for infra. I want to run separate agents in each.",
     "should_trigger": true
   },
   {
@@ -32,7 +32,7 @@
     "should_trigger": true
   },
   {
-    "query": "set up status indicators in the sidebar showing which microservices are running â€” api on port 3000, auth on 3001, and the worker on 3002. Green if healthy, red if down.",
+    "query": "set up status indicators in the sidebar showing which microservices are running — api on port 3000, auth on 3001, and the worker on 3002. Green if healthy, red if down.",
     "should_trigger": true
   },
   {
@@ -52,7 +52,7 @@
     "should_trigger": false
   },
   {
-    "query": "help me configure my ghostty terminal â€” I want to change the font to JetBrains Mono and set the background opacity to 0.95",
+    "query": "help me configure my ghostty terminal — I want to change the font to JetBrains Mono and set the background opacity to 0.95",
     "should_trigger": false
   },
   {

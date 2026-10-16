@@ -46,7 +46,19 @@
     {
       "id": 8,
       "prompt": "Run some JavaScript in the cmux browser to grab `document.querySelectorAll('button').length` and tell me the count.",
-      "expected_output": "Claude should recognize that `cmux browser eval` is currently broken upstream (manaflow-ai/cmux#2610) and use the read-only alternative `cmux browser --surface <id> get count \"button\"` instead. It should explain why `eval` is not being used.",
+      "expected_output": "Claude should find the browser surface (`cmux tree`) and run `cmux browser --surface <id> eval \"document.querySelectorAll('button').length\"` (or the equivalent `get count \"button\"`), then report the number. It must NOT claim `eval` is broken or refuse to run JavaScript.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "There's a modal open in the cmux browser. Press Escape to close it, then tell me whether it's gone.",
+      "expected_output": "Claude should use `cmux browser --surface <id> press Escape` (not `cmux send-key`, which targets terminals), then verify with `snapshot` or `eval` that the modal is no longer present.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "From inside the page in the cmux browser (so it uses the page's cookies), fetch /api/me and tell me the HTTP status.",
+      "expected_output": "Claude should use `cmux browser --surface <id> eval` with a promise or async IIFE, e.g. `eval '(async () => (await fetch(\"/api/me\")).status)()'` or `eval 'fetch(\"/api/me\").then(r => r.status)'`. It must NOT use bare top-level `await` (a SyntaxError in cmux eval).",
       "files": []
     }
   ]

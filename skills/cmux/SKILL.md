@@ -39,6 +39,8 @@ The happy path for the most common operations. Use these verbatim before reachin
 | Read surface output | `cmux read-screen --surface <id> --lines 50` |
 | Navigate browser (specific surface) | `cmux browser --surface <id> goto <url>` |
 | Inspect browser page | `cmux browser --surface <id> snapshot` |
+| Run JavaScript in the page | `cmux browser --surface <id> eval '<js>'` |
+| Press a key in the page | `cmux browser --surface <id> press Enter` |
 | Show notification | `cmux notify --title "Title" --body "Body"` |
 | Sidebar status pill | `cmux set-status <key> "value" --icon <name> --color "#hex"` |
 | Sidebar progress bar | `cmux set-progress 0.5 --label "Working..."` |
@@ -48,7 +50,7 @@ IDs accepted everywhere: UUIDs, short refs (`window:1`, `workspace:2`, `pane:3`,
 
 ## Common Mistakes — Never Do This
 
-These commands **do not exist** or are **broken**. Using them is the most common cmux failure mode. The wrong-looking ones are plausible guesses that happen to be wrong — always prefer the "Use instead" column:
+These commands **do not exist**. Using them is the most common cmux failure mode. They are plausible guesses that happen to be wrong — always prefer the "Use instead" column:
 
 | Don't use | Use instead | Why |
 |-----------|-------------|-----|
@@ -56,13 +58,8 @@ These commands **do not exist** or are **broken**. Using them is the most common
 | `cmux send-key-surface <id> enter` | `cmux send-key --surface <id> enter` | Same — `--surface` is a flag, not a suffix |
 | `cmux list-surfaces` / `--json` | `cmux tree` | No `list-surfaces` command exists |
 | `cmux new-split right --browser` | `cmux new-pane --type browser --direction right` | `new-split` has no `--browser` flag and always makes terminals |
-| `cmux browser navigate <url>` | `cmux browser goto <url>` | Subcommand is `goto`, not `navigate` |
-| `cmux browser snapshot --surface <id>` | `cmux browser --surface <id> snapshot` | `--surface` must come **before** the browser subcommand |
-| `cmux browser screenshot --out <path>` | `cmux browser --surface <id> screenshot` | No `--out`; screenshots return base64 (use `--json` for structured output) |
-| `cmux browser eval "..."` | `get text` / `get html` / `snapshot` / `console list` | **Broken upstream** (manaflow-ai/cmux#2610) |
-| `cmux browser press <key>` | `click` / `type` / `fill`, or drive the API with `curl` | **Broken upstream** (manaflow-ai/cmux#2610) |
-| `cmux browser addscript <script>` | No workaround | **Broken upstream** (manaflow-ai/cmux#2610) |
-| `http://localhost:...` in the browser | `http://127.0.0.1:...` | Embedded browser can't resolve `localhost` |
+| `cmux browser eval 'await fetch(...)'` | `cmux browser eval '(async () => { ... })()'` | Top-level `await` is a `SyntaxError`; a returned promise is awaited for you |
+| `http://localhost:...` in the browser | `http://127.0.0.1:...` | Older builds couldn't resolve `localhost`; `127.0.0.1` works everywhere |
 
 If something in this table seems too cautious, sanity-check against the live CLI (`cmux <subcommand> --help`) before assuming the docs are wrong. The patterns here came from real failures.
 
@@ -192,24 +189,49 @@ Use a **unique key per concern** for status pills (`build`, `tests`, `deploy`) s
 
 ## Browser Automation
 
-cmux has an embedded browser with an automation API. Three rules that catch most mistakes:
+cmux has an embedded browser with an automation API. Two rules that catch most mistakes:
 
-1. **`--surface` comes BEFORE the subcommand.** `cmux browser --surface surface:10 snapshot` works. `cmux browser snapshot --surface surface:10` fails with `browser requires a subcommand`.
+1. **Always target a surface explicitly.** Pass `--surface <id>` (conventionally right after `browser`) or the surface as the first positional token: `cmux browser --surface surface:10 snapshot` and `cmux browser surface:10 snapshot` are equivalent. Get the id from `cmux tree` or from the output of `cmux browser open`.
 
-2. **Use `127.0.0.1`, not `localhost`.** The embedded browser cannot resolve `localhost` and shows "This page couldn't load." Substitute `127.0.0.1` in every URL you pass to `open`, `goto`, etc.:
+2. **Use `127.0.0.1`, not `localhost`.** Older cmux builds couldn't resolve `localhost` in the embedded browser ("This page couldn't load"). Current builds can, but `127.0.0.1` works on every version and avoids IPv4/IPv6 ambiguity with dev servers, so substitute it in every URL you pass to `open`, `goto`, etc.:
    ```bash
-   # BROKEN
-   cmux browser open http://localhost:3000
-   # WORKS
    cmux browser open http://127.0.0.1:3000
    ```
 
-3. **`eval`, `press`, and `addscript` are currently broken upstream (manaflow-ai/cmux#2610).** Every invocation — even `cmux browser eval "1"` — returns `Error: js_error: A JavaScript exception occurred`. Read-only commands (`get`, `click`, `snapshot`, `console list`, `errors list`) work fine on the same surface. Until the bug is fixed, use these substitutes:
-   - Instead of `eval` → `get text`, `get html`, `get title`, `snapshot`, `console list`, `errors list`
-   - Instead of `press` → `click`, `type`, `fill`, or drive the underlying API with `curl`
-   - Instead of `addscript` → no workaround; wait for the fix
+### Running JavaScript in the page
 
-### Inspection primitives (the ones that work)
+`eval`, `press`, and `addscript` work on current cmux (verified on 0.65.2; they failed with `js_error` on every call in 0.63 — manaflow-ai/cmux#2610). Use them freely; they're usually faster and more precise than stitching together `get` calls.
+
+```bash
+cmux browser --surface <id> eval 'document.title'
+cmux browser --surface <id> eval "document.querySelectorAll('button').length"
+cmux browser --surface <id> eval '[...document.querySelectorAll("a")].map(a => a.href)'
+cmux browser --surface <id> eval '(async () => (await fetch("/api/health")).status)()'
+```
+
+How `eval` behaves:
+
+- **It returns the value of the last expression.** Objects and arrays come back as pretty-printed JSON; `null` and `undefined` print as such. Multiple statements are fine (`const n = 5; n * 2` → `10`).
+- **Promises are awaited** — `eval 'fetch("/").then(r => r.status)'` prints `200`. **Top-level `await` is a `SyntaxError`**; wrap it in an async IIFE: `eval '(async () => { await ...; return x })()'`.
+- **Exceptions are reported with their real message** and exit 1: `Error: js_error: ReferenceError: Can't find variable: foo`. Read the message — it's the page's actual error.
+- **Quote for the shell.** Single-quote the script so `$`, `!`, and backticks aren't expanded; use double quotes inside the JS. `--script '<js>'` is an equivalent explicit form.
+- **Return data rather than logging it.** `console.log` from `eval`/`addscript` usually shows up in `console list`, but on some strict-CSP sites (e.g. github.com) console capture stays empty even though the script ran.
+
+Keyboard input and injection:
+
+```bash
+cmux browser --surface <id> press Enter          # also: key / keydown / keyup
+cmux browser --surface <id> press Escape         # W3C key names: Tab, ArrowDown, Backspace, b, ...
+cmux browser --surface <id> addscript 'window.__debug = true'
+cmux browser --surface <id> addstyle '.cookie-banner { display: none !important }'
+cmux browser --surface <id> wait --function 'document.querySelectorAll(".row").length > 10' --timeout-ms 5000
+```
+
+- `press` dispatches real key events to the focused element — a `keydown` listener on the page sees them. Focus the target first (`click` or `focus <selector>`) if it matters which element receives the key.
+- `addscript` (alias `addinitscript`) runs the script in the current page immediately. **It does not survive navigation** — re-run it after every `goto`/`reload`.
+- `wait --function` polls a JS predicate until it's truthy — use it instead of `sleep` when waiting on app state.
+
+### Inspection primitives
 
 ```bash
 cmux browser --surface <id> snapshot [--interactive]   # accessibility tree
@@ -224,7 +246,7 @@ cmux browser --surface <id> console list               # captured console messag
 cmux browser --surface <id> errors list                # captured page errors
 ```
 
-`snapshot` returns a structured accessibility tree — the fastest way to understand page state. `--interactive` assigns refs to clickable elements, but see the next section: those refs are fragile.
+`snapshot` returns a structured accessibility tree — the fastest way to understand page state. `--interactive` assigns refs to clickable elements, but see the next section: those refs are fragile. For anything the `get` variants can't express (computed values, filtered lists, app state on `window`), use `eval`.
 
 ### Interacting with pages — two caveats
 
@@ -236,7 +258,7 @@ cmux browser --surface <id> errors list                # captured page errors
    cmux browser --surface surface:10 click '[ref=e12]'
    ```
 
-2. **Synthetic clicks may not trigger React state changes.** `cmux browser click` (and `element.click()` / dispatched MouseEvents) often do not propagate through React's synthetic event system, so tab switches and other React-controlled interactions can silently do nothing. For inspection this is fine; for *interaction* with React apps, fall back to hitting the underlying APIs with `curl`.
+2. **Synthetic clicks may not trigger React state changes.** `cmux browser click` (and `element.click()` / dispatched MouseEvents) often do not propagate through React's synthetic event system, so tab switches and other React-controlled interactions can silently do nothing. Always confirm an interaction landed (`snapshot`, or `eval` on the state you expected to change). If it didn't, try keyboard input (`focus <selector>` then `press Enter` / `press Space`), or hit the underlying APIs with `curl` or `eval '(async () => ...)()'` with `fetch`.
 
 ### Debugging workflow
 
@@ -247,8 +269,9 @@ When something is broken in a web app running in a cmux browser surface:
 3. **Check visible text:** `cmux browser --surface <id> get text "body"`
 4. **Check captured console output:** `cmux browser --surface <id> console list`
 5. **Check captured page errors:** `cmux browser --surface <id> errors list`
-6. **If the page won't load at all**, try `127.0.0.1` instead of `localhost`.
-7. **For API-level bugs, use `curl` directly** — and remember `eval`/`press` are currently broken (manaflow-ai/cmux#2610), so API-level testing is the robust path.
+6. **Probe live state with `eval`:** app globals, `localStorage`, computed styles, or an in-page `fetch` that carries the page's cookies — e.g. `eval 'JSON.stringify(localStorage)'`.
+7. **If the page won't load at all**, try `127.0.0.1` instead of `localhost`.
+8. **For API-level bugs, use `curl` directly** — or `eval` with `fetch` when the request needs the page's session.
 
 ## Intelligent Splitting
 

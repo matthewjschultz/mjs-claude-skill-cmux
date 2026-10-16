@@ -168,37 +168,49 @@ cmux sidebar-state [--workspace <id|ref>]
 
 ## Browser automation
 
-The embedded browser has its own automation API. See SKILL.md for the high-level rules (`--surface` placement, `127.0.0.1` rule, broken subcommands). This section is the exhaustive command list.
+The embedded browser has its own automation API. See SKILL.md for the high-level rules (explicit surface targeting, `127.0.0.1` rule, `eval` semantics). This section lists the commonly used subcommands; `cmux browser --help` has the full set (`find`, `frame`, `dialog`, `cookies`, `storage`, `network`, `viewport`, `repl`, and more).
+
+Target a surface with `--surface <id>` after `browser`, or pass it as the first positional token (`cmux browser surface:10 snapshot`).
 
 ```bash
 cmux browser open [url]                        # Open/reuse a browser surface; prints surface id
 cmux browser open-split [url]                  # Explicit split
-cmux browser goto <url> [--snapshot-after]
+cmux browser goto|navigate <url> [--snapshot-after]
 cmux browser back|forward|reload [--snapshot-after]
-cmux browser snapshot [--interactive] [--compact]
-cmux browser click <selector> [--snapshot-after]
+cmux browser snapshot [--interactive] [--compact] [--selector <css>] [--max-depth <n>]
+cmux browser click|dblclick|hover|focus <selector> [--snapshot-after]
 cmux browser type <selector> <text> [--snapshot-after]
 cmux browser fill <selector> [text] [--snapshot-after]
-cmux browser screenshot [--json]               # Returns base64 PNG (no --out flag)
-cmux browser wait [--selector <css>] [--text <text>] [--url-contains <text>] [--timeout-ms <ms>]
+cmux browser select <selector> <value> [--snapshot-after]
+cmux browser screenshot [--out <path>] [--json] # Without --out, saves to a temp file and prints its path
+cmux browser wait [--selector <css>] [--text <text>] [--url-contains <text>] [--function <js>] [--timeout-ms <ms>]
 cmux browser get <url|title|text|html|value|attr|count|box|styles> [...]
 cmux browser is <visible|enabled|checked> <selector>
+cmux browser eval '<js>'                       # Prints the last expression's value (JSON for objects)
+cmux browser press|key|keydown|keyup <key>     # W3C key names: Enter, Escape, Tab, ArrowDown, b, ...
+cmux browser addscript '<js>'                  # Alias: addinitscript. Runs now; does not survive navigation
+cmux browser addstyle '<css>'                  # Inject CSS into the current page
+cmux browser focus-webview | is-webview-focused
 cmux browser console <list|clear>              # Read/clear captured console messages
 cmux browser errors <list|clear>               # Read/clear captured page errors
 cmux browser tab <new|list|switch|close|<index>> [...]
 ```
 
-**BROKEN upstream (manaflow-ai/cmux#2610) — do not use:**
+### `eval` quick reference
 
-- `cmux browser eval <script>` — fails with `js_error`
-- `cmux browser press <key>` — fails with `js_error`
-- `cmux browser addscript <script>` — fails with `js_error`
+```bash
+cmux browser --surface surface:10 eval 'document.title'
+cmux browser --surface surface:10 eval '({ w: innerWidth, h: innerHeight })'     # → JSON object
+cmux browser --surface surface:10 eval 'fetch("/api").then(r => r.status)'      # promise is awaited
+cmux browser --surface surface:10 eval '(async () => { await x(); return 1 })()' # top-level await is a SyntaxError
+cmux browser --surface surface:10 eval --script 'document.title'                # explicit form
+```
 
-Substitutes: `get text`, `get html`, `snapshot`, `console list`, `errors list` (instead of `eval`); `click`, `type`, `fill` (instead of `press`); no workaround for `addscript`.
+Exceptions exit 1 with the page's real message, e.g. `Error: js_error: Error: boom`.
 
 ### `get` variants
 
-`get` extracts specific fields from the page without running JS:
+`get` extracts specific fields from the page without writing JS:
 
 ```bash
 cmux browser --surface surface:10 get title
@@ -286,9 +298,9 @@ These work on most commands:
 | `CMUX_SOCKET_PATH` | Override socket path (default: `~/Library/Application Support/cmux/cmux.sock`) |
 | `CMUX_SOCKET_PASSWORD` | Socket auth password (if required) |
 
-## Unsupported / removed / broken commands
+## Nonexistent commands
 
-Never use these:
+These were never real commands. Never use them:
 
 | Don't use | Use instead |
 |-----------|-------------|
@@ -296,9 +308,3 @@ Never use these:
 | `cmux send-key-surface` | `cmux send-key --surface <id>` |
 | `cmux list-surfaces` / `cmux list-surfaces --json` | `cmux tree` |
 | `cmux new-split --browser` | `cmux new-pane --type browser --direction <dir>` |
-| `cmux browser navigate <url>` | `cmux browser goto <url>` |
-| `cmux browser screenshot --out <path>` | `cmux browser --surface <id> screenshot` (returns base64) or `--json` |
-| `cmux browser screenshot` (without `--surface` first) | `cmux browser --surface <id> screenshot` |
-| `cmux browser eval <script>` — **broken** (manaflow-ai/cmux#2610) | `get text` / `get html` / `snapshot` / `console list` / `errors list` |
-| `cmux browser press <key>` — **broken** (manaflow-ai/cmux#2610) | `click` / `type` / `fill`, or hit the API directly with `curl` |
-| `cmux browser addscript <script>` — **broken** (manaflow-ai/cmux#2610) | No workaround; wait for the fix |
