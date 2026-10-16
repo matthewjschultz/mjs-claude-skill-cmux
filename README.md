@@ -40,4 +40,4 @@ This skill documents [cmux](https://github.com/manaflow-ai/cmux) by Manaflow. It
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
