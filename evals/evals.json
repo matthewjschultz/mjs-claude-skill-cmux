@@ -10,7 +10,7 @@
     {
       "id": 2,
       "prompt": "Open a new pane to the right and start a dev server with `npm run dev` in it. I want to keep coding in this pane.",
-      "expected_output": "Claude should use cmux new-split right, then cmux tree (or capture the output of new-split) to get the new surface ID, then `cmux send --surface <id> \"npm run dev\"` followed by `cmux send-key --surface <id> enter` to start the dev server. Must NOT use `cmux send-surface` (non-existent command).",
+      "expected_output": "Claude should open the split and start the server in one step with `cmux new-split right --command \"npm run dev\"` (ideally `--focus false` so the user's pane keeps focus), or with `cmux new-split right` followed by `cmux send --surface <id> \"npm run dev\"` and `cmux send-key --surface <id> enter`. Must NOT use `cmux send-surface` (non-existent command).",
       "files": []
     },
     {
@@ -59,6 +59,24 @@
       "id": 10,
       "prompt": "From inside the page in the cmux browser (so it uses the page's cookies), fetch /api/me and tell me the HTTP status.",
       "expected_output": "Claude should use `cmux browser --surface <id> eval` with a promise or async IIFE, e.g. `eval '(async () => (await fetch(\"/api/me\")).status)()'` or `eval 'fetch(\"/api/me\").then(r => r.status)'`. It must NOT use bare top-level `await` (a SyntaxError in cmux eval).",
+      "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "I clicked the 'Billing' tab in my React app in the cmux browser with `cmux browser click` and nothing happened. Can you switch to that tab and tell me what the billing page shows?",
+      "expected_output": "Claude should recognise that CLI `click` is synthetic (`isTrusted` false) and redo the click with `cmux browser repl`, attaching to the visible tab via `tabs.list()`/`tabs.use(id)` and using a Playwright locator such as `getByRole(\"tab\", { name: \"Billing\" }).click()`, then read the result with `snapshot()`. Keyboard input (`focus` + `press Enter`) is an acceptable alternative. It must not conclude the app is broken without trying trusted input.",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "There's another Claude Code session running in my workspace called 'auth'. Tell it the database migration has landed on main and it should rebase before continuing.",
+      "expected_output": "Claude should use `cmux agent message auth \"...\"` (or the workspace/surface ref from `cmux tree`). It must NOT use `cmux send` / `send-key` to type into that agent's terminal.",
+      "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "Show me what you changed on this branch compared to main, side by side, without moving me off this pane.",
+      "expected_output": "Claude should run `cmux diff --branch --base main --focus false` (or equivalent), which opens the diff viewer in a pane without taking focus, rather than printing `git diff` into the terminal.",
       "files": []
     }
   ]

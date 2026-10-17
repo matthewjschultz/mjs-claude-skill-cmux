@@ -10,13 +10,17 @@ It activates on its own whenever Claude Code is running inside cmux (detected vi
 
 ## What it covers
 
-- Discovering the layout with `cmux tree`, and splitting panes sensibly based on what's already open.
-- Sending commands to other terminals and reading their output, for orchestrating several agents at once.
+- Discovering the layout with `cmux tree` and `cmux identify`, and splitting panes sensibly based on what's already open, without stealing the user's focus.
+- Starting commands in new panes with `--command`, sending input to shells, and reading their output.
+- Orchestrating several agents at once, and talking to them with `cmux agent message` instead of typing into their terminals.
 - Sidebar feedback for long-running work: status pills, progress, log entries, and completion notifications, used only when they help.
-- Browser automation: opening browser panes, inspecting pages, running JavaScript with `eval`, keyboard input with `press`, script and style injection, and waiting on page state.
+- Showing results in panes: the Markdown viewer, the diff viewer, and window screenshots and recordings.
+- Browser automation: opening browser panes, inspecting pages, `eval`, `press`, dialogs, viewport emulation, and `cmux browser repl` for Playwright-style scripting with trusted input.
 - `wait-for` signals for synchronizing agents across panes.
 
-The browser guidance is verified against cmux 0.65.2. `eval`, `press`, and `addscript` failed on every call in cmux 0.63 ([manaflow-ai/cmux#2610](https://github.com/manaflow-ai/cmux/issues/2610)); the JS path was reworked after 0.63, they work on 0.65.2, and the skill now uses them.
+Everything in the skill is verified against cmux 0.65.2. `eval`, `press`, and `addscript` failed on every call in cmux 0.63 ([manaflow-ai/cmux#2610](https://github.com/manaflow-ai/cmux/issues/2610)); they work on 0.65.2, and the skill now uses them.
+
+cmux also ships its own agent guide and skills (`cmux guide`, `cmux docs <topic>`). This skill is a single, opinionated pattern guide for Claude Code that points to them for depth.
 
 ## Contents
 
